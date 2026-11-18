@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ai provider - الوكيل الذكي</title>
+    <style>
+        body { font-family: Tahoma, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .card { background: #1e293b; padding: 30px; border-radius: 12px; width: 100%; max-width: 480px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        h1 { color: #38bdf8; font-size: 24px; text-align: center; margin-bottom: 5px; }
+        p { color: #94a3b8; text-align: center; font-size: 14px; margin-bottom: 20px; }
+        .box { background: #0f172a; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #334155; }
+        input { width: 100%; padding: 12px; margin-top: 10px; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #fff; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #0284c7; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 12px; }
+        button:hover { background: #0369a1; }
+        button:disabled { background: #475569; cursor: not-allowed; }
+        .hidden { display: none; }
+        #response { margin-top: 15px; padding: 12px; background: #0f172a; border-radius: 6px; color: #e2e8f0; font-size: 14px; line-height: 1.6; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h1>ai provider</h1>
+    <p>منصة الوكيل الذكي للأعمال والتجارة</p>
+    
+    <div id="trial-section">
+        <div class="box">
+            <p style="margin:0; color:#38bdf8;">الأسئلة المتبقية: <strong id="count">3</strong></p>
+        </div>
+        <input type="text" id="user-question" placeholder="اكتب سؤالك هنا...">
+        <button id="send-btn" onclick="askQuestion()">إرسال السؤال</button>
+        <div id="response"></div>
+    </div>
+
+    <div id="key-section" class="hidden" style="text-align: center;">
+        <div class="box" style="color: #f87171;">
+            انتهت محاولاتك التجريبية!
+        </div>
+        <p>أدخل مفتاح التفعيل (Activation Key) للمتابعة:</p>
+        <input type="text" id="activation-key" placeholder="مثال: AI-2026-VIP">
+        <button onclick="saveKey()">تفعيل الحساب</button>
+    </div>
+</div>
+
+<script>
+    let remaining = 3;
+    let savedKey = "";
+
+    async function askQuestion() {
+        const qInput = document.getElementById('user-question');
+        const btn = document.getElementById('send-btn');
+        const resp = document.getElementById('response');
+        const question = qInput.value.trim();
+
+        if (!question) return alert('الرجاء كتابة سؤال أولاً');
+
+        btn.disabled = true;
+        btn.innerText = "جاري المعالجة...";
+        resp.style.display = "block";
+        resp.innerText = "يفكر الوكيل الذكي...";
+
+        try {
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question, activationKey: savedKey })
+            });
+            const data = await res.json();
+
+            if (res.ok) {
+                resp.innerText = data.reply;
+                qInput.value = '';
+                if (!savedKey) {
+                    remaining--;
+                    document.getElementById('count').innerText = remaining;
+                    if (remaining <= 0) {
+                        setTimeout(() => {
+                            document.getElementById('trial-section').classList.add('hidden');
+                            document.getElementById('key-section').classList.remove('hidden');
+                        }, 2000);
+                    }
+                }
+            } else {
+                resp.innerText = "تنبيه: " + data.error;
+            }
+        } catch (err) {
+            resp.innerText = "حدث خطأ في الاتصال بالخادم.";
+        } finally {
+            btn.disabled = false;
+            btn.innerText = "إرسال السؤال";
+        }
+    }
+
+    function saveKey() {
+        const keyInput = document.getElementById('activation-key').value.trim();
+        if (!keyInput) return alert("أدخل المفتاح أولاً");
+        savedKey = keyInput;
+        document.getElementById('key-section').classList.add('hidden');
+        document.getElementById('trial-section').classList.remove('hidden');
+        document.getElementById('count').innerText = "مفعّل (غير محدود)";
+        document.getElementById('response').style.display = "none";
+    }
+</script>
+
+</body>
+</html>
