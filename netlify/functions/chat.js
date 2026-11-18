@@ -28,9 +28,9 @@ exports.handler = async function(event, context) {
             };
         }
 
-        const prompt = "أنت وكيل ذكي واحترافي لمنصة 'ai provider' المتخصصة في التجارة وسلاسل التوريد والأعمال الرقمية. أجب باختصار واحترافية باللغة العربية: " + question;
+        const prompt = "أنت وكيل ذكي واحترافي لمنصة 'ai provider' المتخصصة في التجارة وسلاسل التوريد والأعمال الرقمية. أجب باختصار واحترافية باللغة العربية على السؤال التالي: " + question;
 
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`, {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -41,7 +41,7 @@ exports.handler = async function(event, context) {
         const data = await response.json();
 
         if (!response.ok) {
-            const errMsg = data.error?.message || JSON.stringify(data);
+            const errMsg = data.error?.message || "خطأ في الاتصال بالذكاء الاصطناعي";
             return {
                 statusCode: response.status,
                 headers: { "Content-Type": "application/json" },
