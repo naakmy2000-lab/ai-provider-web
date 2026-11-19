@@ -1,4 +1,6 @@
-exports.handler = async function(event, context) {
+const TEXT_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"];
+
+exports.handler = async function(event) {
     if (event.httpMethod !== "POST") {
         return {
             statusCode: 405,
@@ -37,84 +39,47 @@ exports.handler = async function(event, context) {
         }
 
         const prompt =
-            "أنت وكيل ذكي واحترافي لمنصة 'ai provider' المتخصصة في التجارة وسلاسل التوريد والأعمال الرقمية. أجب بوضوح واختصار واحترافية باللغة العربية على السؤال التالي: " +
+            "أجب باختصار ووضوح باللغة العربية على السؤال التالي في مجال التجارة وسلاسل التوريد والأعمال: " +
             String(question).trim();
 
-        const modelsRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-        const modelsData = await modelsRes.json().catch(() => ({}));
+        let lastError = "الخدمة تواجه ضغطاً مؤقتاً، يرجى المحاولة بعد قليل.";
+        let lastStatus = 503;
 
-        if (!modelsRes.ok) {
-            return {
-                statusCode: modelsRes.status,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    error: modelsData.error?.message || "تعذر التحقق من النماذج المتاحة للمفتاح."
-                })
-            };
-        }
+        for (const model of TEXT_MODELS) {
+            try {
+                const response = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }]
+                        }),
+                        signal: AbortSignal.timeout(7000)
+                    }
+                );
 
-        const blockedKeywords = ["tts", "audio", "image", "imagen", "veo", "embedding", "aqa", "live"];
+                const data = await response.json().catch(() => ({}));
 
-        const textModels = (modelsData.models || [])
-            .filter((m) =>
-                Array.isArray(m.supportedGenerationMethods) &&
-                m.supportedGenerationMethods.includes("generateContent")
-            )
-            .map((m) => m.name.replace(/^models\//, ""))
-            .filter((name) => !blockedKeywords.some((kw) => name.toLowerCase().includes(kw)));
+                if (response.ok) {
+                    const reply =
+                        data.candidates?.[0]?.content?.parts?.[0]?.text ||
+                        "لم يتم استلام نص من النموذج.";
 
-        const preferredOrder = [
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite",
-            "gemini-flash-latest",
-            "gemini-pro-latest"
-        ];
-
-        const orderedCandidates = [
-            ...preferredOrder.filter((name) => textModels.includes(name)),
-            ...textModels.filter((name) => !preferredOrder.includes(name))
-        ];
-
-        if (orderedCandidates.length === 0) {
-            return {
-                statusCode: 404,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ error: "لا يوجد نموذج نصي متاح حالياً لهذا المفتاح." })
-            };
-        }
-
-        let lastError = "تعذر الحصول على رد من النموذج حالياً.";
-        let lastStatus = 500;
-
-        for (const modelName of orderedCandidates) {
-            const response = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        contents: [{ parts: [{ text: prompt }] }]
-                    })
+                    return {
+                        statusCode: 200,
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ reply })
+                    };
                 }
-            );
 
-            const data = await response.json().catch(() => ({}));
-
-            if (response.ok) {
-                const reply =
-                    data.candidates?.[0]?.content?.parts?.[0]?.text ||
-                    "عذراً، لم أتمكن من صياغة إجابة.";
-
-                return {
-                    statusCode: 200,
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ reply })
-                };
+                lastStatus = response.status;
+                lastError = data.error?.message || lastError;
+            } catch (err) {
+                lastError = err.name === "TimeoutError"
+                    ? "انتهت مهلة الاتصال بالخادم، حاول مرة أخرى."
+                    : err.message;
             }
-
-            lastStatus = response.status;
-            lastError = data.error?.message || lastError;
         }
 
         return {
@@ -122,7 +87,6 @@ exports.handler = async function(event, context) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ error: lastError })
         };
-
     } catch (error) {
         return {
             statusCode: 500,
