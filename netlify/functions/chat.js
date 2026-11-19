@@ -1,5 +1,3 @@
-const TEXT_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"];
-
 exports.handler = async function(event) {
     if (event.httpMethod !== "POST") {
         return {
@@ -42,44 +40,38 @@ exports.handler = async function(event) {
             "أجب باختصار ووضوح باللغة العربية على السؤال التالي في مجال التجارة وسلاسل التوريد والأعمال: " +
             String(question).trim();
 
-        let lastError = "الخدمة تواجه ضغطاً مؤقتاً، يرجى المحاولة بعد قليل.";
+        const models = ["gemini-3.5-flash-lite", "gemini-3.8-flash"];
+        let lastError = "تعذر الحصول على رد من الخادم حالياً.";
         let lastStatus = 503;
 
-        for (const model of TEXT_MODELS) {
-            try {
-                const response = await fetch(
-                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-                    {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: prompt }] }]
-                        }),
-                        signal: AbortSignal.timeout(7000)
-                    }
-                );
-
-                const data = await response.json().catch(() => ({}));
-
-                if (response.ok) {
-                    const reply =
-                        data.candidates?.[0]?.content?.parts?.[0]?.text ||
-                        "لم يتم استلام نص من النموذج.";
-
-                    return {
-                        statusCode: 200,
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ reply })
-                    };
+        for (const model of models) {
+            const response = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }]
+                    })
                 }
+            );
 
-                lastStatus = response.status;
-                lastError = data.error?.message || lastError;
-            } catch (err) {
-                lastError = err.name === "TimeoutError"
-                    ? "انتهت مهلة الاتصال بالخادم، حاول مرة أخرى."
-                    : err.message;
+            const data = await response.json().catch(() => ({}));
+
+            if (response.ok) {
+                const reply =
+                    data.candidates?.[0]?.content?.parts?.[0]?.text ||
+                    "لم يرسل النموذج نصاً.";
+
+                return {
+                    statusCode: 200,
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ reply })
+                };
             }
+
+            lastStatus = response.status;
+            lastError = data.error?.message || lastError;
         }
 
         return {
