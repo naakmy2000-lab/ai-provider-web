@@ -40,7 +40,6 @@ exports.handler = async function(event, context) {
             "أنت وكيل ذكي واحترافي لمنصة 'ai provider' المتخصصة في التجارة وسلاسل التوريد والأعمال الرقمية. أجب بوضوح واختصار واحترافية باللغة العربية على السؤال التالي: " +
             String(question).trim();
 
-        // جلب قائمة النماذج المتاحة فعلاً لهذا المفتاح
         const modelsRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
         const modelsData = await modelsRes.json().catch(() => ({}));
 
@@ -54,38 +53,41 @@ exports.handler = async function(event, context) {
             };
         }
 
-        const availableModels = (modelsData.models || [])
+        const blockedKeywords = ["tts", "audio", "image", "imagen", "veo", "embedding", "aqa", "live"];
+
+        const textModels = (modelsData.models || [])
             .filter((m) =>
                 Array.isArray(m.supportedGenerationMethods) &&
                 m.supportedGenerationMethods.includes("generateContent")
             )
-            .map((m) => m.name.replace(/^models\//, ""));
+            .map((m) => m.name.replace(/^models\//, ""))
+            .filter((name) => !blockedKeywords.some((kw) => name.toLowerCase().includes(kw)));
 
-        // ترتيب الأفضلية مع ضمان اختيار أي نموذج متاح يدعم generateContent
         const preferredOrder = [
             "gemini-2.5-flash",
             "gemini-2.0-flash",
             "gemini-2.0-flash-lite",
-            "gemini-flash-latest"
+            "gemini-flash-latest",
+            "gemini-pro-latest"
         ];
 
         const orderedCandidates = [
-            ...preferredOrder.filter((name) => availableModels.includes(name)),
-            ...availableModels.filter((name) => !preferredOrder.includes(name) && name.includes("gemini"))
+            ...preferredOrder.filter((name) => textModels.includes(name)),
+            ...textModels.filter((name) => !preferredOrder.includes(name))
         ];
 
         if (orderedCandidates.length === 0) {
             return {
                 statusCode: 404,
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ error: "لا يوجد نموذج يدعم توليد النصوص متاح حالياً لهذا المفتاح." })
+                body: JSON.stringify({ error: "لا يوجد نموذج نصي متاح حالياً لهذا المفتاح." })
             };
         }
 
         let lastError = "تعذر الحصول على رد من النموذج حالياً.";
         let lastStatus = 500;
 
-        for (const modelName of orderedCandidates.slice(0, 4)) {
+        for (const modelName of orderedCandidates) {
             const response = await fetch(
                 `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
                 {
