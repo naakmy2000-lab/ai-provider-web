@@ -1,5 +1,12 @@
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const MODELS_PRIORITY = [
+    "gemini-3.8-flash",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash"
+];
+
 exports.handler = async function(event, context) {
     if (event.httpMethod !== "POST") {
         return {
@@ -30,55 +37,83 @@ exports.handler = async function(event, context) {
             };
         }
 
+        if (!question || !String(question).trim()) {
+            return {
+                statusCode: 400,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ error: "يرجى كتابة سؤال أولاً." })
+            };
+        }
+
         const prompt =
-            "أنت وكيل ذكي واحترافي لمنصة 'ai provider' المتخصصة في التجارة وسلاسل التوريد والأعمال الرقمية. أجب باختصار واحترافية باللغة العربية على السؤال التالي: " +
-            question;
+            "أنت وكيل ذكي واحترافي لمنصة 'ai provider' المتخصصة في التجارة وسلاسل التوريد والأعمال الرقمية. أجب بوضوح واختصار واحترافية باللغة العربية على السؤال التالي: " +
+            String(question).trim();
 
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-
-        let lastStatus = 500;
+        let lastStatus = 503;
         let lastErrorMessage = "الخدمة تشهد ضغطاً مؤقتاً الآن، يرجى المحاولة بعد قليل.";
 
-        // إعادة المحاولة حتى 3 مرات عند وجود ضغط مؤقت (429 أو 503)
-        for (let attempt = 1; attempt <= 3; attempt++) {
-            const response = await fetch(endpoint, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }]
-                })
-            });
+        for (const model of MODELS_PRIORITY) {
+            const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-            const data = await response.json();
-
-            if (response.ok) {
-                const reply =
-                    data.candidates?.[0]?.content?.parts?.[0]?.text ||
-                    "عذراً، لم أتمكن من صياغة إجابة.";
-
-                return {
-                    statusCode: 200,
+            for (let attempt = 1; attempt <= 2; attempt++) {
+                const response = await fetch(endpoint, {
+                    method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ reply })
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }]
+                    })
+                });
+
+                const data = await response.json().catch(() => ({}));
+
+                if (response.ok) {
+                    const reply =
+                        data.candidates?.[0]?.content?.parts?.[0]?.text ||
+                        "عذراً، لم أتمكن من صياغة إجابة.";
+
+                    return {
+                        statusCode: 200,
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ reply, modelUsed: model })
+                    };
+                }
+
+                lastStatus = response.status;
+                const rawMsg = data.error?.message || "";
+                const lowerMsg = rawMsg.toLowerCase();
+
+                const isRetriable =
+                    response.status === 429 ||
+                    response.status === 500 ||
+                    response.status === 502 ||
+                    response.status === 503 ||
+                    response.status === 504 ||
+                    response.status === 404 ||
+                    lowerMsg.includes("high demand") ||
+                    lowerMsg.includes("no longer available") ||
+                    lowerMsg.includes("not found");
+
+                if (rawMsg) {
+                    lastErrorMessage = rawMsg;
+                }
+
+                if (isRetriable && attempt < 2) {
+                    await sleep(1000);
+                    continue;
+                }
+
+                // انتقل فوراً للنموذج التالي في القائمة إذا كان الخطأ قابلاً للتجاوز
+                if (isRetriable) {
+                    break;
+                }
+
+                // إذا كان الخطأ في المفتاح مثلاً (400/401/403 غير مرتبط بمفتاح التفعيل)، أوقف المحاولة وأرجع السبب
+                return {
+                    statusCode: response.status,
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ error: rawMsg || lastErrorMessage })
                 };
             }
-
-            lastStatus = response.status;
-            const rawMsg = data.error?.message || "";
-            const isTemporarySpike =
-                response.status === 429 ||
-                response.status === 503 ||
-                rawMsg.toLowerCase().includes("high demand");
-
-            if (isTemporarySpike && attempt < 3) {
-                await sleep(1500 * attempt);
-                continue;
-            }
-
-            lastErrorMessage = isTemporarySpike
-                ? "الخدمة تشهد ضغطاً مؤقتاً الآن من مزود النموذج، يرجى المحاولة مرة أخرى بعد لحظات."
-                : (rawMsg || lastErrorMessage);
-            break;
         }
 
         return {
