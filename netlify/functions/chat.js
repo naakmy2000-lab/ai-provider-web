@@ -1,3 +1,5 @@
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 exports.handler = async function(event, context) {
     if (event.httpMethod !== "POST") {
         return {
@@ -28,33 +30,61 @@ exports.handler = async function(event, context) {
             };
         }
 
-        const prompt = "أنت وكيل ذكي واحترافي لمنصة 'ai provider' المتخصصة في التجارة وسلاسل التوريد والأعمال الرقمية. أجب باختصار واحترافية باللغة العربية على السؤال التالي: " + question;
+        const prompt =
+            "أنت وكيل ذكي واحترافي لمنصة 'ai provider' المتخصصة في التجارة وسلاسل التوريد والأعمال الرقمية. أجب باختصار واحترافية باللغة العربية على السؤال التالي: " +
+            question;
 
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
-        });
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-        const data = await response.json();
+        let lastStatus = 500;
+        let lastErrorMessage = "الخدمة تشهد ضغطاً مؤقتاً الآن، يرجى المحاولة بعد قليل.";
 
-        if (!response.ok) {
-            const errMsg = data.error?.message || "خطأ في الاتصال بالذكاء الاصطناعي";
-            return {
-                statusCode: response.status,
+        // إعادة المحاولة حتى 3 مرات عند وجود ضغط مؤقت (429 أو 503)
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            const response = await fetch(endpoint, {
+                method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ error: errMsg })
-            };
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }]
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                const reply =
+                    data.candidates?.[0]?.content?.parts?.[0]?.text ||
+                    "عذراً، لم أتمكن من صياغة إجابة.";
+
+                return {
+                    statusCode: 200,
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ reply })
+                };
+            }
+
+            lastStatus = response.status;
+            const rawMsg = data.error?.message || "";
+            const isTemporarySpike =
+                response.status === 429 ||
+                response.status === 503 ||
+                rawMsg.toLowerCase().includes("high demand");
+
+            if (isTemporarySpike && attempt < 3) {
+                await sleep(1500 * attempt);
+                continue;
+            }
+
+            lastErrorMessage = isTemporarySpike
+                ? "الخدمة تشهد ضغطاً مؤقتاً الآن من مزود النموذج، يرجى المحاولة مرة أخرى بعد لحظات."
+                : (rawMsg || lastErrorMessage);
+            break;
         }
 
-        const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "عذراً، لم أتمكن من صياغة إجابة.";
-
         return {
-            statusCode: 200,
+            statusCode: lastStatus,
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ reply })
+            body: JSON.stringify({ error: lastErrorMessage })
         };
 
     } catch (error) {
